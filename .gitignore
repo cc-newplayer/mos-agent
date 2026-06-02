@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# 敏感配置
+config.py
+
+# 运行产物
+screenshots/
+traces/
+test_data/
+*.png
+*.jpg
+
+# 废弃文件
+_deprecated/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
