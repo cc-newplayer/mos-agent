@@ -1,10 +1,101 @@
-# MOS 运营值守 Agent
+# MOS Agent - 营销系统自动化测试框架
 
-自动化测试框架，支持黑盒测试、日报生成、飞书推送。
+基于 Playwright 的自动化测试框架，用于 MOS（Marketing Operating System）的端到端测试。支持两种测试模式：操作用例批量验证 和 闭环工作流监控。
+
+## 系统架构
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    入口脚本                          │
+├──────────────┬──────────────┬───────────────────────┤
+│ test_runner  │ test_single  │ loop_workflow/         │
+│ (全量操作)   │ (单条操作)   │ test_loop_workflow    │
+│              │              │ (单个闭环)             │
+├──────────────┴──────────────┼───────────────────────┤
+│       executor/             │  skills/              │
+│  runner.py (操作执行器)     │  batch_executor/      │
+│  loop_handler.py (轮询)    │  (批量闭环执行器)     │
+├─────────────────────────────┴───────────────────────┤
+│  loop_workflow/                                      │
+│  loop_monitor.py (实时监控) + loop_reporter.py      │
+├─────────────────────────────────────────────────────┤
+│  trace/ (操作追踪)  │  feishu/ (飞书推送)           │
+└─────────────────────────────────────────────────────┘
+```
+
+## 两条测试线
+
+### 1. 操作用例测试
+
+从 Excel 加载用例，自动执行 UI 操作并验证结果。覆盖账号管理、事件源配置、定时任务等模块。
+
+```bash
+# 跑全量用例
+python test_runner.py
+
+# 跑单条
+python test_single_case.py 22
+```
+
+### 2. 闭环工作流测试
+
+向系统发送一条自然语言指令，系统自主执行完整业务闭环（调研→决策→执行→生成报告）。测试框架负责：输入指令 → 实时监控执行状态 → 检测完成信号 → 生成报告 → 推送飞书。
+
+```bash
+# 单个闭环
+python loop_workflow/test_loop_workflow.py 1 "KOL跟评" "用一个引流号对elonmusk最新的一篇帖子执行KOL跟评闭环"
+
+# 批量闭环（从 Excel 读取）
+python skills/batch_executor/run_batch.py loops.xlsx
+```
+
+## 核心能力
+
+- 操作追踪：每条用例的完整操作链路（导航→查找→点击→验证）记录为 JSON，可追溯
+- 实时监控：闭环执行期间定时轮询页面内容，检测成功/失败信号
+- 信号检测：识别"任务执行报告"（成功）、"规划阶段出错"（失败）、"Error code: 500"（服务异常）
+- 飞书推送：测试结果自动推送到飞书群
+- 批量执行：支持 Excel/JSON/CSV 输入，依次执行多个闭环并汇总报告
+
+## 项目结构
+
+```
+mos-agent/
+├── config.example.py          # 配置模板（复制为 config.py 使用）
+├── test_runner.py             # 全量操作用例入口
+├── test_single_case.py        # 单条操作用例入口
+├── daily_report.py            # 从 trace 生成日报
+│
+├── cases/
+│   └── loader.py              # Excel 用例加载器
+│
+├── executor/
+│   ├── runner.py              # 操作用例执行器（Playwright）
+│   └── loop_handler.py        # 闭环轮询处理器
+│
+├── loop_workflow/
+│   ├── test_loop_workflow.py  # 闭环工作流入口
+│   ├── loop_monitor.py        # 实时监控模块
+│   └── loop_reporter.py       # 报告生成 + 飞书推送
+│
+├── skills/
+│   └── batch_executor/        # 批量闭环执行器
+│       ├── run_batch.py       # 入口
+│       ├── batch_loader.py    # 多格式文件加载
+│       ├── batch_executor.py  # 执行逻辑
+│       └── batch_reporter.py  # 汇总报告
+│
+├── trace/
+│   └── tracker.py             # 操作追踪系统
+│
+├── feishu/
+│   └── sender.py              # 飞书 Webhook 推送
+│
+└── report/
+    └── builder.py             # 报告构建器
+```
 
 ## 快速开始
-
-### 1. 环境准备
 
 ```bash
 # 安装依赖
@@ -12,146 +103,20 @@ pip install playwright openpyxl requests
 
 # 安装浏览器
 playwright install chromium
-```
 
-### 2. 配置
+# 配置
+cp config.example.py config.py
+# 编辑 config.py 填入系统地址、账号密码、飞书 Webhook
 
-编辑 `config.py`：
-- `SYSTEM_URL`: 系统地址（已配置为 MOS）
-- `LOGIN_USERNAME` / `LOGIN_PASSWORD`: 登录账号（已配置为 wly）
-- `FEISHU_WEBHOOK`: 飞书 Webhook 地址（已配置）
-- `EXCEL_FILE`: 测试用例文件路径
-
-### 3. 运行
-
-```bash
-# 干运行（只生成报告，不推送）
-python test_runner.py --dry-run
-
-# 完整运行（推送到飞书）
+# 运行操作用例测试
 python test_runner.py
 
-# 只运行指定模块
-python test_runner.py --module "账号配置"
-
-# 只运行指定优先级
-python test_runner.py --level P1
+# 运行闭环测试
+python loop_workflow/test_loop_workflow.py 1 "测试名称" "测试指令"
 ```
-
-## 项目结构
-
-```
-mos-agent/
-├── config.py                 # 配置文件（系统 URL、账号、Webhook）
-├── test_runner.py            # 主入口（命令行工具）
-├── README.md                 # 本文件
-│
-├── cases/
-│   ├── __init__.py
-│   └── loader.py             # 读取 Excel 测试用例
-│
-├── executor/
-│   ├── __init__.py
-│   └── runner.py             # Playwright 执行测试逻辑
-│
-├── report/
-│   ├── __init__.py
-│   └── builder.py            # 生成日报
-│
-├── feishu/
-│   ├── __init__.py
-│   └── sender.py             # 推送飞书
-│
-└── test_data/                # 测试数据文件（导入用）
-    ├── test_accounts.txt
-    ├── test_accounts.jsonl
-    ├── empty.txt
-    └── invalid.txt
-```
-
-## 日报格式
-
-```
-【MOS 自动化测试日报】2026-05-21
-
-测试总数：47
-通过：8（17.0%）
-失败：1
-跳过：38
-
-失败用例：
-- 用例编号 用例描述 | 错误：错误信息
-
-模块覆盖：
-  账号配置：8/16 通过
-  事件源：0/4 通过
-  ...
-
-执行时间：62.3秒
-```
-
-## 当前支持的模块
-
-| 模块 | 用例数 | 状态 | 支持的操作 |
-|------|--------|------|----------|
-| 账号配置 | 16 | ✅ 完成 | 导入、新建、编辑、删除 |
-| 事件源 | 4 | ✅ 完成 | 手动编辑、对话框配置、添加监听 |
-| 决策代理 | 11 | ⏳ 待实现 | - |
-| 执行日志 | 3 | ⏳ 待实现 | - |
-| 知识库 | 2 | ⏳ 待实现 | - |
-| 管理员 | 7 | ⏳ 待实现 | - |
-| 其他 | 4 | ⏳ 待实现 | - |
-
-## 测试结果
-
-**当前状态：**
-- 总用例数：47
-- 通过：8（17.0%）
-- 失败：1
-- 跳过：38
-
-**账号模块测试通过的用例：**
-- MOS_USER_001: 账号导入 txt 文件
-- MOS_USER_002: 账号导入 jsonl 文件
-- MOS_USER_005: 新建账号
-- MOS_USER_006: 批量新建账号
-- MOS_USER_008: 编辑账号
-- MOS_USER_009: 编辑账号
-- MOS_USER_010: 删除账号
-- MOS_USER_011: 配置不同的IP
-
-## 常见问题
-
-### Q: 如何修改测试用例？
-A: 编辑 `AI营销系统测试用例完整.xlsx` 文件，修改对应的步骤和预期结果。
-
-### Q: 如何添加新的测试模块？
-A: 
-1. 在 `executor/runner.py` 中的 `execute_case` 方法添加模块判断
-2. 实现对应的 `_test_xxx_module` 方法
-3. 在方法中编写 Playwright 自动化脚本
-
-### Q: 如何调试测试脚本？
-A: 在 `config.py` 中设置 `HEADLESS = False`，这样会显示浏览器窗口。
-
-### Q: 飞书推送失败怎么办？
-A: 检查 `config.py` 中的 `FEISHU_WEBHOOK` 是否正确配置。
-
-## 下一步计划
-
-- [ ] 完善决策代理模块测试
-- [ ] 完善其他模块测试
-- [ ] 修复 NoneType 错误
-- [ ] 设置定时任务（Windows 任务计划）
-- [ ] 设计通用框架（YAML 配置 + 自动探测）
 
 ## 技术栈
 
-- **自动化框架**: Playwright（异步）
-- **Excel 处理**: openpyxl
-- **HTTP 请求**: requests
-- **消息推送**: 飞书 Webhook API
-
-## 联系方式
-
-如有问题，请联系开发团队。
+- Playwright (async) — 浏览器自动化
+- openpyxl — Excel 用例加载
+- requests — 飞书 Webhook 推送
